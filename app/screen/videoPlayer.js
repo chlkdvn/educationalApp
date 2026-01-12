@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Animated,
     Dimensions,
     SafeAreaView,
     ScrollView,
@@ -30,6 +31,7 @@ const CourseVideoPlayer = () => {
     const { getToken } = useAuth();
 
     const videoRef = useRef(null);
+    const scaleAnim = useRef(new Animated.Value(1)).current;
 
     const [course, setCourse] = useState(null);
     const [progress, setProgress] = useState({ lectureCompleted: [] });
@@ -39,11 +41,10 @@ const CourseVideoPlayer = () => {
     const [loading, setLoading] = useState(true);
     const [videoStatus, setVideoStatus] = useState({});
     const [userRating, setUserRating] = useState(0);
-    const [isRatingSubmitted, setIsRatingSubmitted] = useState(false);
+    const [ratingLoading, setRatingLoading] = useState(false);
     const [videoError, setVideoError] = useState(null);
     const [isVideoBuffering, setIsVideoBuffering] = useState(false);
 
-    // Fetch enrolled courses + rating
     const fetchEnrolledCourses = useCallback(async () => {
         if (!isLoaded || !user) return;
 
@@ -55,34 +56,24 @@ const CourseVideoPlayer = () => {
 
             const data = await res.json();
             if (data.success && data.enrolledCourses) {
-                const currentCourse = data.enrolledCourses.find(c => c._id === courseId);
+                const currentCourse = data.enrolledCourses.find((c) => c._id === courseId);
                 if (currentCourse) {
                     setCourse(currentCourse);
-
-                    const existingRating = currentCourse.courseRatings?.find(
-                        r => r.userId === user?.id
-                    );
-                    if (existingRating) {
-                        setUserRating(existingRating.rating);
-                        setIsRatingSubmitted(true);
-                    }
+                    const existing = currentCourse.courseRatings?.find(r => r.userId === user.id);
+                    setUserRating(existing?.rating || 0);
                 } else {
-                    Alert.alert('Error', 'Course not found in your enrolled courses');
                     navigation.goBack();
                 }
             }
         } catch (err) {
-            console.error(err);
-            Alert.alert('Error', 'Failed to load course');
+            console.error('Load courses error:', err);
         } finally {
             setLoading(false);
         }
     }, [courseId, getToken, isLoaded, user, navigation]);
 
-    // Fetch progress
     const fetchProgress = useCallback(async () => {
         if (!courseId || !user || !isLoaded) return;
-
         try {
             const token = await getToken();
             const res = await fetch(`${BACKEND_URL}/api/user/get-course-progress`, {
@@ -93,13 +84,10 @@ const CourseVideoPlayer = () => {
                 },
                 body: JSON.stringify({ courseId }),
             });
-
             const data = await res.json();
-            if (data.success) {
-                setProgress(data.progressData || { lectureCompleted: [] });
-            }
+            if (data.success) setProgress(data.progressData || { lectureCompleted: [] });
         } catch (err) {
-            console.error(err);
+            console.error('Progress error:', err);
         }
     }, [courseId, getToken, isLoaded, user]);
 
@@ -110,14 +98,11 @@ const CourseVideoPlayer = () => {
         }, [fetchEnrolledCourses, fetchProgress])
     );
 
-    // Video loading
     useEffect(() => {
         const loadVideo = async () => {
             if (!videoRef.current || !selectedLecture?.lectureUrl) return;
-
             setVideoError(null);
             setIsVideoBuffering(true);
-
             try {
                 await videoRef.current.unloadAsync();
                 await videoRef.current.loadAsync(
@@ -126,30 +111,26 @@ const CourseVideoPlayer = () => {
                     true
                 );
             } catch (error) {
-                console.error('Video load failed:', error);
-                setVideoError('Failed to load video. Please check your connection.');
+                setVideoError('Failed to load video.');
+            } finally {
                 setIsVideoBuffering(false);
             }
         };
-
         loadVideo();
     }, [selectedLecture?.lectureUrl]);
 
-    // Auto-mark complete
     useEffect(() => {
         if (videoStatus.didJustFinish && selectedLecture && !isCompleted(selectedLecture.lectureId)) {
             markComplete(selectedLecture.lectureId);
         }
     }, [videoStatus.didJustFinish]);
 
-    // Buffering state
     useEffect(() => {
         if (videoStatus.isLoaded !== undefined) {
             setIsVideoBuffering(videoStatus.isBuffering === true);
         }
     }, [videoStatus.isBuffering, videoStatus.isLoaded]);
 
-    // Fullscreen toggle
     const toggleFullscreen = async () => {
         try {
             if (isFullscreen) {
@@ -166,7 +147,6 @@ const CourseVideoPlayer = () => {
 
     const markComplete = async (lectureId) => {
         if (!lectureId || !user) return;
-
         try {
             const token = await getToken();
             const res = await fetch(`${BACKEND_URL}/api/user/update-course-progress`, {
@@ -177,23 +157,29 @@ const CourseVideoPlayer = () => {
                 },
                 body: JSON.stringify({ courseId, lectureId }),
             });
-
             const data = await res.json();
             if (data.success) {
                 setProgress(prev => ({
                     ...prev,
                     lectureCompleted: [...(prev.lectureCompleted || []), lectureId],
                 }));
-                Alert.alert('Success', 'Lecture marked as complete!');
             }
         } catch (err) {
-            Alert.alert('Error', 'Failed to save progress');
+            console.error('Mark complete error:', err);
         }
     };
 
-    // Improved rating with safe JSON handling
     const submitRating = async (rating) => {
-        if (!user || !courseId || isRatingSubmitted) return;
+        if (!courseId || !user || ratingLoading) return;
+
+        // Instant visual feedback
+        setUserRating(rating);
+
+        setRatingLoading(true);
+        Animated.sequence([
+            Animated.timing(scaleAnim, { toValue: 1.15, duration: 60, useNativeDriver: true }),
+            Animated.timing(scaleAnim, { toValue: 1, duration: 100, useNativeDriver: true }),
+        ]).start();
 
         try {
             const token = await getToken();
@@ -203,29 +189,23 @@ const CourseVideoPlayer = () => {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ courseId, rating }),
+                body: JSON.stringify({
+                    courseId,
+                    rating,
+                    userId: user.id,
+                }),
             });
 
-            let data;
-            try {
-                data = await res.json();
-            } catch (parseErr) {
-                const text = await res.text();
-                console.warn('Invalid JSON response:', text);
-                Alert.alert('Server Error', 'Received invalid response from server.');
-                return;
-            }
-
-            if (data.success) {
-                setUserRating(rating);
-                setIsRatingSubmitted(true);
-                Alert.alert('Thank You!', `You rated this course ${rating} star${rating > 1 ? 's' : ''}`);
-            } else {
-                Alert.alert('Error', data.message || 'Failed to submit rating');
+            const data = await res.json();
+            if (!data.success) {
+                setUserRating(0); // revert if failed
+                Alert.alert('Error', data.message || 'Failed to save');
             }
         } catch (err) {
-            console.error('Rating error:', err);
-            Alert.alert('Error', 'Network error. Please try again.');
+            setUserRating(0);
+            Alert.alert('Error', 'Network error');
+        } finally {
+            setRatingLoading(false);
         }
     };
 
@@ -258,39 +238,39 @@ const CourseVideoPlayer = () => {
     };
 
     const StarRating = ({ rating, onRate }) => (
-        <View style={styles.starContainer}>
-            {[1, 2, 3, 4, 5].map((star) => (
-                <TouchableOpacity
-                    key={star}
-                    onPress={() => onRate(star)}
-                    disabled={isRatingSubmitted}
-                    style={styles.starButton}
-                >
-                    <Ionicons
-                        name={star <= rating ? 'star' : 'star-outline'}
-                        size={40}
-                        color="#FFD700"
-                    />
-                </TouchableOpacity>
-            ))}
-        </View>
+        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+            <View style={styles.starContainer}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                    <TouchableOpacity
+                        key={star}
+                        onPress={() => onRate(star)}
+                        disabled={ratingLoading}
+                        activeOpacity={0.65}
+                        hitSlop={{ top: 30, bottom: 30, left: 30, right: 30 }}
+                        style={styles.starButton}
+                    >
+                        <Ionicons
+                            name={star <= rating ? 'star' : 'star-outline'}
+                            size={50}
+                            color={star <= rating ? '#FFD700' : '#777'}
+                        />
+                    </TouchableOpacity>
+                ))}
+            </View>
+        </Animated.View>
     );
 
-    if (loading) {
-        return (
-            <SafeAreaView style={styles.container}>
-                <ActivityIndicator size="large" color="#00A67E" style={{ flex: 1 }} />
-            </SafeAreaView>
-        );
-    }
+    if (loading) return (
+        <SafeAreaView style={styles.container}>
+            <ActivityIndicator size="large" color="#00A67E" />
+        </SafeAreaView>
+    );
 
-    if (!course) {
-        return (
-            <SafeAreaView style={styles.container}>
-                <Text style={styles.errorText}>Course not found</Text>
-            </SafeAreaView>
-        );
-    }
+    if (!course) return (
+        <SafeAreaView style={styles.container}>
+            <Text style={styles.errorText}>Course not found</Text>
+        </SafeAreaView>
+    );
 
     return (
         <SafeAreaView style={styles.container}>
@@ -308,7 +288,6 @@ const CourseVideoPlayer = () => {
                 </View>
             )}
 
-            {/* Video Player */}
             <View style={isFullscreen ? styles.fullscreenVideo : styles.videoSection}>
                 {selectedLecture ? (
                     <>
@@ -321,10 +300,7 @@ const CourseVideoPlayer = () => {
                             isLooping={false}
                             volume={1.0}
                             onPlaybackStatusUpdate={setVideoStatus}
-                            onError={(e) => {
-                                setVideoError('Failed to play video.');
-                                setIsVideoBuffering(false);
-                            }}
+                            onError={(e) => setVideoError('Failed to play video.')}
                         />
 
                         {isVideoBuffering && (
@@ -361,7 +337,7 @@ const CourseVideoPlayer = () => {
                 ) : (
                     <View style={styles.placeholder}>
                         <Ionicons name="play-circle-outline" size={80} color="#ccc" />
-                        <Text style={styles.placeholderText}>Tap a lecture to start watching</Text>
+                        <Text style={styles.placeholderText}>Tap a lecture to start</Text>
                     </View>
                 )}
 
@@ -370,14 +346,14 @@ const CourseVideoPlayer = () => {
                 </TouchableOpacity>
             </View>
 
-            {/* Content Section - Clean White & Perfectly Aligned */}
             {!isFullscreen && (
                 <ScrollView style={styles.contentScroll} showsVerticalScrollIndicator={false}>
                     {selectedLecture && (
                         <View style={styles.lectureInfo}>
                             <Text style={styles.lectureTitle}>{decode(selectedLecture.lectureTitle)}</Text>
                             <Text style={styles.lectureMeta}>
-                                Chapter {selectedLecture.chapter} • Lecture {selectedLecture.lecture} • {formatDuration(selectedLecture.lectureDuration)}
+                                Chapter {selectedLecture.chapter} • Lecture {selectedLecture.lecture} •{' '}
+                                {formatDuration(selectedLecture.lectureDuration)}
                             </Text>
 
                             <TouchableOpacity
@@ -387,7 +363,7 @@ const CourseVideoPlayer = () => {
                             >
                                 <Ionicons name="checkmark-circle" size={20} color="#fff" />
                                 <Text style={styles.completeText}>
-                                    {isCompleted(selectedLecture.lectureId) ? 'Completed' : 'Mark as Complete'}
+                                    {isCompleted(selectedLecture.lectureId) ? 'Completed' : 'Mark Complete'}
                                 </Text>
                             </TouchableOpacity>
                         </View>
@@ -395,7 +371,7 @@ const CourseVideoPlayer = () => {
 
                     <View style={styles.progressSection}>
                         <View style={styles.progressHeader}>
-                            <Text style={styles.progressLabel}>Course Progress</Text>
+                            <Text style={styles.progressLabel}>Progress</Text>
                             <Text style={styles.progressPercent}>{calculateProgress()}%</Text>
                         </View>
                         <View style={styles.progressBar}>
@@ -403,13 +379,23 @@ const CourseVideoPlayer = () => {
                         </View>
                     </View>
 
+                    {/* Rating - Fast, responsive, unlimited */}
                     <View style={styles.ratingSection}>
                         <Text style={styles.sectionTitle}>Rate this Course</Text>
-                        <Text style={styles.ratingSubtitle}>Your feedback helps us improve</Text>
-                        <StarRating rating={userRating} onRate={submitRating} />
-                        {isRatingSubmitted && (
-                            <Text style={styles.thankYouText}>
-                                ✓ Thank you for your rating!
+                        <Text style={styles.ratingSubtitle}>Tap to rate (you can change anytime)</Text>
+
+                        {ratingLoading ? (
+                            <View style={styles.ratingLoadingContainer}>
+                                <ActivityIndicator size="small" color="#00A67E" />
+                                <Text style={styles.ratingLoadingText}>Saving...</Text>
+                            </View>
+                        ) : (
+                            <StarRating rating={userRating} onRate={submitRating} />
+                        )}
+
+                        {userRating > 0 && (
+                            <Text style={styles.currentRatingText}>
+                                Your rating: {userRating} ★
                             </Text>
                         )}
                     </View>
@@ -428,10 +414,17 @@ const CourseVideoPlayer = () => {
                                         <Text style={styles.chapterTitle}>{chapter.chapterTitle}</Text>
                                         <Text style={styles.chapterMeta}>
                                             {chapter.chapterContent?.length || 0} lectures •{' '}
-                                            {formatDuration(chapter.chapterContent?.reduce((a, l) => a + (l.lectureDuration || 0), 0) || 0)}
+                                            {formatDuration(
+                                                chapter.chapterContent?.reduce((a, l) => a + (l.lectureDuration || 0), 0) || 0
+                                            )}
                                         </Text>
                                     </View>
-                                    <Ionicons name="chevron-down" size={20} color="#aaa" style={{ transform: [{ rotate: openChapters[chIdx] ? '180deg' : '0deg' }] }} />
+                                    <Ionicons
+                                        name="chevron-down"
+                                        size={20}
+                                        color="#aaa"
+                                        style={{ transform: [{ rotate: openChapters[chIdx] ? '180deg' : '0deg' }] }}
+                                    />
                                 </TouchableOpacity>
 
                                 {openChapters[chIdx] && (
@@ -441,7 +434,7 @@ const CourseVideoPlayer = () => {
                                                 key={lecture.lectureId}
                                                 style={[
                                                     styles.lectureItem,
-                                                    selectedLecture?.lectureId === lecture.lectureId && styles.selectedLecture
+                                                    selectedLecture?.lectureId === lecture.lectureId && styles.selectedLecture,
                                                 ]}
                                                 onPress={() => selectLecture(lecture, chIdx, lecIdx)}
                                             >
@@ -506,10 +499,22 @@ const styles = StyleSheet.create({
     videoSection: { height: height * 0.35 },
     fullscreenVideo: { flex: 1, backgroundColor: '#000' },
     video: { width: '100%', height: '100%' },
-    fullscreenBtn: { position: 'absolute', bottom: 40, right: 20, backgroundColor: 'rgba(0,0,0,0.6)', padding: 14, borderRadius: 30 },
+    fullscreenBtn: {
+        position: 'absolute',
+        bottom: 40,
+        right: 20,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        padding: 14,
+        borderRadius: 30,
+    },
     placeholder: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' },
     placeholderText: { color: '#aaa', marginTop: 16, fontSize: 16 },
-    loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' },
+    loadingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     loadingText: { color: '#fff', marginTop: 12, fontSize: 16 },
     errorOverlayText: { color: '#fff', textAlign: 'center', paddingHorizontal: 40, fontSize: 16, marginBottom: 20 },
     retryButton: { paddingHorizontal: 24, paddingVertical: 12, backgroundColor: '#007AFF', borderRadius: 8 },
@@ -518,7 +523,6 @@ const styles = StyleSheet.create({
 
     contentScroll: { flex: 1, backgroundColor: '#fff' },
 
-    // Current Lecture Info
     lectureInfo: { padding: 20, backgroundColor: '#f8f9fa' },
     lectureTitle: { fontSize: 20, fontWeight: '700', color: '#222', marginBottom: 8 },
     lectureMeta: { fontSize: 14, color: '#666', marginBottom: 20 },
@@ -536,7 +540,6 @@ const styles = StyleSheet.create({
     completedBtn: { backgroundColor: '#00A67E' },
     completeText: { color: '#fff', fontWeight: '600', fontSize: 16 },
 
-    // Progress
     progressSection: { paddingHorizontal: 20, paddingVertical: 20 },
     progressHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
     progressLabel: { fontSize: 16, color: '#333', fontWeight: '600' },
@@ -544,23 +547,71 @@ const styles = StyleSheet.create({
     progressBar: { height: 10, backgroundColor: '#e0e0e0', borderRadius: 5, overflow: 'hidden' },
     progressFill: { height: '100%', backgroundColor: '#00A67E', borderRadius: 5 },
 
-    // Rating
-    ratingSection: { padding: 24, alignItems: 'center', backgroundColor: '#f8f9fa' },
+    ratingSection: {
+        padding: 24,
+        alignItems: 'center',
+        backgroundColor: '#f8f9fa',
+        borderRadius: 16,
+        marginHorizontal: 16,
+        marginVertical: 12,
+        elevation: 2,
+    },
     sectionTitle: { fontSize: 20, fontWeight: '700', color: '#222', marginBottom: 8 },
-    ratingSubtitle: { fontSize: 14, color: '#666', marginBottom: 20, textAlign: 'center' },
-    starContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-    starButton: { padding: 8 },
-    thankYouText: { marginTop: 12, color: '#00A67E', fontWeight: '600', fontSize: 15 },
+    ratingSubtitle: { fontSize: 14, color: '#666', marginBottom: 16, textAlign: 'center' },
+    ratingLoadingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        marginVertical: 20,
+    },
+    ratingLoadingText: {
+        color: '#00A67E',
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    starContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginVertical: 16,
+    },
+    starButton: {
+        padding: 14,
+    },
+    starDisabled: {
+        opacity: 0.6,
+    },
+    currentRatingText: {
+        marginTop: 12,
+        fontSize: 15,
+        color: '#444',
+        fontWeight: '600',
+    },
 
-    // Chapters
-    chaptersSection: { paddingHorizontal: 20, paddingBottom: 30 },
-    chapterCard: { backgroundColor: '#fff', borderRadius: 16, marginBottom: 16, overflow: 'hidden', elevation: 3, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8 },
-    chapterHeader: { flexDirection: 'row', alignItems: 'center', padding: 18, backgroundColor: '#f9f9f9' },
+    chaptersSection: { paddingHorizontal: 20, paddingBottom: 40 },
+    chapterCard: {
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        marginBottom: 16,
+        overflow: 'hidden',
+        elevation: 3,
+    },
+    chapterHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 18,
+        backgroundColor: '#f9f9f9',
+    },
     chapterInfo: { flex: 1, marginLeft: 12 },
     chapterTitle: { fontSize: 17, fontWeight: '600', color: '#222' },
     chapterMeta: { fontSize: 13, color: '#666', marginTop: 4 },
     lecturesList: { backgroundColor: '#fff' },
-    lectureItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 18 },
+    lectureItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 18,
+    },
     selectedLecture: { backgroundColor: '#f0f7ff' },
     lectureDetails: { flex: 1, marginLeft: 16 },
     lectureTitleItem: { fontSize: 15, color: '#333', lineHeight: 20 },

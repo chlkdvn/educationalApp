@@ -1,4 +1,5 @@
 import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
+import { useFonts } from "expo-font";
 import { Stack, useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { useEffect } from "react";
@@ -20,7 +21,7 @@ if (typeof global.CustomEvent === "undefined") {
   global.CustomEvent.prototype = Object.create(Object.prototype);
 }
 
-// ✅ TOKEN CACHE (THIS IS WHAT YOU WERE ASKING ABOUT)
+// ✅ TOKEN CACHE
 const tokenCache = {
   async getToken(key) {
     return SecureStore.getItemAsync(key);
@@ -30,13 +31,34 @@ const tokenCache = {
   },
 };
 
+// ✅ SET GLOBAL DEFAULT TEXT FONT
+if (Text.defaultProps == null) {
+  Text.defaultProps = {};
+}
+Text.defaultProps.style = {
+  fontFamily: "SpaceMono-Regular",
+};
+
 export default function RootLayout() {
   const PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+  // ✅ LOAD ONLY WHAT EXISTS (SpaceMono)
+  const [fontsLoaded] = useFonts({
+    "SpaceMono-Regular": require("../assets/fonts/SpaceMono-Regular.ttf"),
+  });
+
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <Text>Loading...</Text>
+      </View>
+    );
+  }
 
   return (
     <ClerkProvider
       publishableKey={PUBLISHABLE_KEY}
-      tokenCache={tokenCache}   // 👈 THIS LINE FIXES SESSION
+      tokenCache={tokenCache}
     >
       <AuthGate />
     </ClerkProvider>
@@ -102,4 +124,3 @@ function AuthGate() {
     </Stack>
   );
 }
-    

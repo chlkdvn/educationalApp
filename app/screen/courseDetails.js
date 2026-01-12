@@ -1,13 +1,13 @@
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { decode } from 'html-entities';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     Dimensions,
     Image,
+    Modal,
     SafeAreaView,
     ScrollView,
     StyleSheet,
@@ -15,6 +15,8 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import RenderHtml from 'react-native-render-html';
+import WebView from 'react-native-webview';
 
 const { width, height } = Dimensions.get('window');
 
@@ -23,11 +25,16 @@ const CourseDetail = () => {
     const { user } = useUser();
     const { getToken } = useAuth();
     const { courseId } = useLocalSearchParams();
+
     const [course, setCourse] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [purchasing, setPurchasing] = useState(false);
+    const [paymentUrl, setPaymentUrl] = useState(null);
+    const [showWebView, setShowWebView] = useState(false);
     const [activeTab, setActiveTab] = useState('About');
+
+    const webViewRef = useRef(null);
 
     useEffect(() => {
         if (!courseId) {
@@ -47,7 +54,7 @@ const CourseDetail = () => {
                     {
                         method: 'GET',
                         headers: {
-                            'Authorization': `Bearer ${token}`,
+                            Authorization: `Bearer ${token}`,
                             'Content-Type': 'application/json',
                         },
                     }
@@ -76,7 +83,6 @@ const CourseDetail = () => {
         fetchCourse();
     }, [courseId]);
 
-    // Updated enrollment function - matches web version exactly
     const handlePurchase = async () => {
         if (!user) {
             Alert.alert('Login Required', 'Please login to enroll in this course');
@@ -93,7 +99,7 @@ const CourseDetail = () => {
                 {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${token}`,
+                        Authorization: `Bearer ${token}`,
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ courseId }),
@@ -102,29 +108,37 @@ const CourseDetail = () => {
 
             const data = await response.json();
 
-            // Already enrolled
             if (data.alreadyEnrolled) {
                 Alert.alert('Already Enrolled', 'You are already enrolled in this course!');
-                setPurchasing(false);
                 return;
             }
 
-            // Paystack redirect URL received
             if (data.success && data.authorization_url) {
-                // Open Paystack in browser (required for Paystack mobile flow)
-                // In Expo, we can use Linking to open external browser
-                const Linking = require('expo-linking');
-                Linking.openURL(data.authorization_url);
+                setPaymentUrl(data.authorization_url);
+                setShowWebView(true);
                 return;
             }
 
-            // Any other case = error
-            Alert.alert('Payment Error', data.message || 'Unable to start payment. Please try again.');
+            Alert.alert('Payment Error', data.message || 'Unable to start payment.');
         } catch (err) {
-            console.error('Payment initialization error:', err);
-            Alert.alert('Error', 'Payment failed. Please check your connection and try again.');
+            console.error('Payment error:', err);
+            Alert.alert('Error', 'Payment initialization failed. Please try again.');
         } finally {
             setPurchasing(false);
+        }
+    };
+
+    const handleWebViewNavigationStateChange = (navState) => {
+        const { url } = navState;
+
+        if (url.includes('success') || url.includes('reference') || url.includes('completed')) {
+            setShowWebView(false);
+            Alert.alert('Payment Successful', 'You have been enrolled in the course!', [
+                { text: 'OK', onPress: () => router.push('/screen/myCourses') },
+            ]);
+        } else if (url.includes('cancel') || url.includes('failed')) {
+            setShowWebView(false);
+            Alert.alert('Payment Cancelled', 'The payment was not completed.');
         }
     };
 
@@ -135,14 +149,6 @@ const CourseDetail = () => {
         return `${hrs > 0 ? `${hrs}h ` : ''}${mins}m`;
     };
 
-    const calculateFinalPrice = () => {
-        if (!course) return 0;
-        return course.discount > 0
-            ? Math.round(course.coursePrice * (100 - course.discount) / 100)
-            : course.coursePrice;
-    };
-
-    // Loading
     if (loading) {
         return (
             <SafeAreaView style={styles.container}>
@@ -154,7 +160,6 @@ const CourseDetail = () => {
         );
     }
 
-    // Error
     if (error || !course) {
         return (
             <SafeAreaView style={styles.container}>
@@ -168,7 +173,11 @@ const CourseDetail = () => {
         );
     }
 
-    const finalPrice = calculateFinalPrice();
+    // Safe to calculate price now
+    const finalPrice =
+        course.discount > 0
+            ? Math.round(course.coursePrice * (100 - course.discount) / 100)
+            : course.coursePrice;
 
     return (
         <SafeAreaView style={styles.container}>
@@ -243,9 +252,22 @@ const CourseDetail = () => {
                     {/* About Tab */}
                     {activeTab === 'About' && (
                         <View style={styles.aboutSection}>
-                            <Text style={styles.aboutText}>
-                                {decode(course.courseDescription || 'No description available.')}
-                            </Text>
+                            <RenderHtml
+                                contentWidth={width - 40}
+                                source={{ html: course.courseDescription || '<p>No description available.</p>' }}
+                                baseStyle={{
+                                    color: '#333',
+                                    fontSize: 15,
+                                    lineHeight: 24,
+                                }}
+                                tagsStyles={{
+                                    h3: { fontSize: 20, fontWeight: '700', color: '#1A1A1A', marginTop: 20, marginBottom: 12 },
+                                    p: { marginBottom: 14 },
+                                    strong: { fontWeight: '700' },
+                                    em: { fontStyle: 'italic' },
+                                }}
+                            />
+
                             <View style={styles.benefitsSection}>
                                 <Text style={styles.sectionTitle}>What You'll Get</Text>
                                 <View style={styles.benefitsList}>
@@ -273,6 +295,7 @@ const CourseDetail = () => {
                                     </View>
                                 </View>
                             </View>
+
                             <View style={styles.studentsSection}>
                                 <Text style={styles.sectionTitle}>
                                     {course.enrolledStudents?.length || 0} Students Enrolled
@@ -321,7 +344,43 @@ const CourseDetail = () => {
                 </View>
             </ScrollView>
 
-            {/* Enroll / Buy Button */}
+            {/* WebView Payment Modal */}
+            <Modal visible={showWebView} animationType="slide" onRequestClose={() => setShowWebView(false)}>
+                <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+                    <View style={styles.webviewHeader}>
+                        <TouchableOpacity
+                            onPress={() => {
+                                setShowWebView(false);
+                                Alert.alert('Payment Cancelled', 'You closed the payment page.');
+                            }}
+                            style={styles.closeButton}
+                        >
+                            <Ionicons name="close" size={28} color="#000" />
+                        </TouchableOpacity>
+                        <Text style={styles.webviewTitle}>Complete Payment</Text>
+                        <View style={{ width: 28 }} />
+                    </View>
+
+                    {paymentUrl && (
+                        <WebView
+                            ref={webViewRef}
+                            source={{ uri: paymentUrl }}
+                            style={{ flex: 1 }}
+                            onNavigationStateChange={handleWebViewNavigationStateChange}
+                            javaScriptEnabled={true}
+                            domStorageEnabled={true}
+                            startInLoadingState={true}
+                            renderLoading={() => (
+                                <View style={styles.webviewLoading}>
+                                    <ActivityIndicator size="large" color="#1E88FF" />
+                                </View>
+                            )}
+                        />
+                    )}
+                </SafeAreaView>
+            </Modal>
+
+            {/* Enroll Button */}
             <View style={styles.enrollContainer}>
                 <TouchableOpacity
                     style={[styles.enrollButton, purchasing && styles.enrollButtonDisabled]}
@@ -332,9 +391,7 @@ const CourseDetail = () => {
                         <ActivityIndicator color="#fff" />
                     ) : (
                         <>
-                            <Text style={styles.enrollButtonText}>
-                                Enroll Now - ₦{finalPrice}
-                            </Text>
+                            <Text style={styles.enrollButtonText}>Enroll Now - ₦{finalPrice}</Text>
                             <Ionicons name="arrow-forward" size={24} color="#fff" />
                         </>
                     )}
@@ -363,7 +420,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         zIndex: 10,
     },
-    contentSection: { flex: 1, backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -24 },
+    contentSection: {
+        flex: 1,
+        backgroundColor: '#fff',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        marginTop: -24,
+    },
     content: { padding: width * 0.05 },
     courseHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
     courseHeaderLeft: { flex: 1 },
@@ -383,7 +446,6 @@ const styles = StyleSheet.create({
     tabText: { fontSize: width * 0.038, color: '#8E8E93', fontWeight: '600' },
     activeTabText: { color: '#1A1A1A' },
     aboutSection: { marginBottom: 24 },
-    aboutText: { fontSize: width * 0.036, color: '#8E8E93', lineHeight: 24 },
     sectionTitle: { fontSize: width * 0.048, fontWeight: '700', color: '#1A1A1A', marginBottom: 16 },
     benefitsSection: { marginBottom: 24, marginTop: 24 },
     benefitsList: { gap: 16 },
@@ -427,6 +489,30 @@ const styles = StyleSheet.create({
     retryButton: { backgroundColor: '#1E88FF', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 25 },
     retryText: { color: '#fff', fontWeight: '600' },
     emptyText: { fontSize: 16, color: '#666', textAlign: 'center', padding: 20 },
+
+    // WebView styles
+    webviewHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        backgroundColor: '#fff',
+        borderBottomWidth: 1,
+        borderBottomColor: '#eee',
+    },
+    webviewTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+    },
+    closeButton: {
+        padding: 8,
+    },
+    webviewLoading: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
 });
 
 export default CourseDetail;

@@ -1,5 +1,5 @@
 import { useAuth, useUser } from '@clerk/clerk-expo';
-import { Feather, Ionicons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import axios from 'axios';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -21,7 +21,7 @@ import io from 'socket.io-client';
 
 const backendUrl = 'https://educations.onrender.com';
 
-// ── Chat Detail Screen ──────────────────────────────────────────────────
+// ChatDetailScreen - stable component (outside Inbox)
 const ChatDetailScreen = ({
     selectedConversation,
     messages,
@@ -39,6 +39,7 @@ const ChatDetailScreen = ({
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
+            {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => {
                     Keyboard.dismiss();
@@ -49,13 +50,20 @@ const ChatDetailScreen = ({
                 <Text style={styles.headerTitle}>
                     {selectedConversation?.otherUser?.name || 'Chat'}
                 </Text>
-                <View style={{ width: 24 }} /> {/* placeholder for balance */}
+                <View style={styles.headerRight}>
+                    <TouchableOpacity>
+                        <Feather name="phone" size={24} color="#000" />
+                    </TouchableOpacity>
+                    <Feather name="search" size={24} color="#000" style={{ marginLeft: 16 }} />
+                </View>
             </View>
 
+            {/* Date Badge */}
             <View style={styles.dateBadge}>
                 <Text style={styles.dateBadgeText}>Today</Text>
             </View>
 
+            {/* Messages List */}
             <ScrollView
                 ref={scrollRef}
                 style={styles.messageList}
@@ -88,6 +96,7 @@ const ChatDetailScreen = ({
                                     {msg.text}
                                 </Text>
 
+                                {/* Timestamp + Delivery Status */}
                                 <View style={styles.timestampRow}>
                                     <Text
                                         style={[
@@ -98,6 +107,7 @@ const ChatDetailScreen = ({
                                         {msg.time}
                                     </Text>
 
+                                    {/* Only show delivery status for sent messages */}
                                     {msg.sent && (
                                         <View style={styles.deliveryStatus}>
                                             <Text style={styles.checkmark}>✓</Text>
@@ -105,6 +115,9 @@ const ChatDetailScreen = ({
                                                 <Text style={[styles.checkmark, styles.checkmarkDelivered]}>
                                                     ✓
                                                 </Text>
+                                            )}
+                                            {msg.delivered && (
+                                                <Text style={styles.deliveredText}>Delivered</Text>
                                             )}
                                         </View>
                                     )}
@@ -115,6 +128,7 @@ const ChatDetailScreen = ({
                 ))}
             </ScrollView>
 
+            {/* Simplified Input Bar - Removed emoji & attachment icons */}
             <View style={styles.inputBar}>
                 <TextInput
                     style={styles.textInput}
@@ -147,15 +161,13 @@ const ChatDetailScreen = ({
     </SafeAreaView>
 );
 
-// ── Main Inbox Component ────────────────────────────────────────────────
 const Inbox = () => {
     const router = useRouter();
     const { getToken } = useAuth();
     const { user } = useUser();
 
+    const [activeTab, setActiveTab] = useState('Chat');
     const [activeScreen, setActiveScreen] = useState('inbox');
-    const [activeTab, setActiveTab] = useState('inbox');
-
     const [conversations, setConversations] = useState([]);
     const [selectedConversation, setSelectedConversation] = useState(null);
     const [messages, setMessages] = useState([]);
@@ -166,7 +178,7 @@ const Inbox = () => {
     const socketRef = useRef(null);
     const scrollRef = useRef(null);
 
-    // Socket connection
+    // Socket.io setup
     useEffect(() => {
         const initSocket = async () => {
             const token = await getToken();
@@ -195,15 +207,19 @@ const Inbox = () => {
                 }
             });
 
-            socket.on('conversation_updated', () => loadConversations());
+            socket.on('conversation_updated', () => {
+                loadConversations();
+            });
 
             socket.on('connect_error', (err) => console.error('Socket error:', err.message));
         };
 
         initSocket();
 
-        return () => socketRef.current?.disconnect();
-    }, [getToken, user?.id, selectedConversation]);
+        return () => {
+            if (socketRef.current) socketRef.current.disconnect();
+        };
+    }, [getToken, user?.id]);
 
     const scrollToBottom = useCallback(() => {
         setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
@@ -234,14 +250,10 @@ const Inbox = () => {
             if (res.data.success) {
                 const loaded = res.data.messages.map(msg => ({
                     ...msg,
-                    delivered: msg.sender === user?.id,
-                    time: new Date(msg.createdAt || Date.now()).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    })
+                    delivered: msg.sent
                 }));
                 setMessages(loaded);
-                scrollToBottom();
+                setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 200);
             }
         } catch (err) {
             console.error('Load messages error:', err);
@@ -281,11 +293,7 @@ const Inbox = () => {
                 const realMessage = {
                     ...res.data.message,
                     sent: true,
-                    delivered: true,
-                    time: new Date(res.data.message.createdAt || Date.now()).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    })
+                    delivered: true
                 };
                 setMessages(prev => prev.map(m => m._id === tempId ? realMessage : m));
             }
@@ -308,11 +316,27 @@ const Inbox = () => {
         setActiveScreen('chatDetail');
     };
 
-    const InboxList = () => (
+    const InboxScreen = () => (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
+                <Feather name="chevron-left" size={24} color="#000" />
                 <Text style={styles.headerTitle}>Inbox</Text>
-                <View style={{ width: 24 }} /> {/* empty space for symmetry */}
+                <Feather name="search" size={24} color="#000" />
+            </View>
+
+            <View style={styles.tabContainer}>
+                <TouchableOpacity
+                    style={[styles.tab, activeTab === 'Chat' && styles.tabActive]}
+                    onPress={() => setActiveTab('Chat')}
+                >
+                    <Text style={[styles.tabText, activeTab === 'Chat' && styles.tabTextActive]}>Chat</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.tab, activeTab === 'Calls' && styles.tabActive]}
+                    onPress={() => setActiveTab('Calls')}
+                >
+                    <Text style={[styles.tabText, activeTab === 'Calls' && styles.tabTextActive]}>Calls</Text>
+                </TouchableOpacity>
             </View>
 
             {loading ? (
@@ -351,69 +375,10 @@ const Inbox = () => {
                     ))}
                 </ScrollView>
             )}
-
-            {/* Complete Bottom Navigation */}
-            <View style={styles.bottomNav}>
-                <TouchableOpacity
-                    style={styles.navItem}
-                    onPress={() => {
-                        setActiveTab('home');
-                        router.replace('/');
-                    }}
-                >
-                    <Ionicons name="home" size={22} color={activeTab === 'home' ? '#1E88FF' : '#8E8E93'} />
-                    <Text style={[
-                        styles.navLabel,
-                        { color: activeTab === 'home' ? '#1E88FF' : '#8E8E93' }
-                    ]}>HOME</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={styles.navItem}
-                    onPress={() => router.push('/screen/myCourses')}
-                >
-                    <Ionicons name="book-outline" size={22} color={activeTab === 'myCourses' ? '#1E88FF' : '#8E8E93'} />
-                    <Text style={[
-                        styles.navLabel,
-                        { color: activeTab === 'myCourses' ? '#1E88FF' : '#8E8E93' }
-                    ]}>MY COURSES</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={styles.navItem}
-                    onPress={() => setActiveTab('inbox')}
-                >
-                    <Ionicons name="chatbubble-outline" size={22} color={activeTab === 'inbox' ? '#1E88FF' : '#8E8E93'} />
-                    <Text style={[
-                        styles.navLabel,
-                        { color: activeTab === 'inbox' ? '#1E88FF' : '#8E8E93' }
-                    ]}>INBOX</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={styles.navItem}
-                    onPress={() => router.push('/screen/transactions')}
-                >
-                    <Ionicons name="wallet-outline" size={22} color={activeTab === 'transactions' ? '#1E88FF' : '#8E8E93'} />
-                    <Text style={[
-                        styles.navLabel,
-                        { color: activeTab === 'transactions' ? '#1E88FF' : '#8E8E93' }
-                    ]}>TRANSACTION</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={styles.navItem}
-                    onPress={() => router.push('/screen/profile')}
-                >
-                    <Ionicons name="person-outline" size={22} color={activeTab === 'profile' ? '#1E88FF' : '#8E8E93'} />
-                    <Text style={[
-                        styles.navLabel,
-                        { color: activeTab === 'profile' ? '#1E88FF' : '#8E8E93' }
-                    ]}>PROFILE</Text>
-                </TouchableOpacity>
-            </View>
         </SafeAreaView>
     );
+
+    // Removed: CallingScreen, CallsScreen, BottomNav
 
     if (activeScreen === 'chatDetail') {
         return (
@@ -431,7 +396,11 @@ const Inbox = () => {
         );
     }
 
-    return <InboxList />;
+    if (activeTab === 'Calls') {
+        return <InboxScreen />; // Placeholder - you can replace with actual Calls screen later
+    }
+
+    return <InboxScreen />;
 };
 
 const styles = StyleSheet.create({
@@ -445,8 +414,15 @@ const styles = StyleSheet.create({
         paddingVertical: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#F3F4F6',
+        backgroundColor: '#FFF',
     },
     headerTitle: { fontSize: 18, fontWeight: '600', color: '#000' },
+    headerRight: { flexDirection: 'row', alignItems: 'center' },
+    tabContainer: { flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 12, gap: 8 },
+    tab: { flex: 1, paddingVertical: 12, borderRadius: 24, alignItems: 'center', backgroundColor: '#F9FAFB' },
+    tabActive: { backgroundColor: '#1E88FF' },
+    tabText: { fontSize: 15, fontWeight: '600', color: '#6B7280' },
+    tabTextActive: { color: '#FFF' },
     chatList: { flex: 1 },
     chatItem: {
         flexDirection: 'row',
@@ -461,26 +437,10 @@ const styles = StyleSheet.create({
     chatName: { fontSize: 16, fontWeight: '600', color: '#000', marginBottom: 4 },
     chatMessage: { fontSize: 14, color: '#6B7280' },
     chatRight: { alignItems: 'flex-end' },
-    badge: {
-        backgroundColor: '#1E88FF',
-        borderRadius: 12,
-        minWidth: 24,
-        height: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 8,
-        marginBottom: 4,
-    },
+    badge: { backgroundColor: '#1E88FF', borderRadius: 12, minWidth: 24, height: 24, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, marginBottom: 4 },
     badgeText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
     chatTime: { fontSize: 12, color: '#9CA3AF' },
-    dateBadge: {
-        alignSelf: 'center',
-        backgroundColor: '#E5E7EB',
-        paddingHorizontal: 16,
-        paddingVertical: 6,
-        borderRadius: 12,
-        marginVertical: 16,
-    },
+    dateBadge: { alignSelf: 'center', backgroundColor: '#E5E7EB', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 12, marginVertical: 16 },
     dateBadgeText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
     messageList: { flex: 1 },
     messagesContent: { paddingHorizontal: 16, paddingBottom: 20, flexGrow: 1 },
@@ -494,18 +454,14 @@ const styles = StyleSheet.create({
     bubbleText: { fontSize: 15, lineHeight: 20 },
     messageTextSent: { color: '#FFF' },
     messageTextReceived: { color: '#000' },
-    timestampRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'flex-end',
-        marginTop: 4,
-    },
+    timestampRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 4 },
     timestamp: { fontSize: 11, marginHorizontal: 4 },
     messageTimeSent: { color: '#D1FAE5' },
     messageTimeReceived: { color: '#9CA3AF' },
     deliveryStatus: { flexDirection: 'row', alignItems: 'center', marginLeft: 8 },
     checkmark: { fontSize: 14, color: '#D1FAE5', marginLeft: -6 },
     checkmarkDelivered: { color: '#1E88FF' },
+    deliveredText: { fontSize: 10, color: '#D1FAE5', marginLeft: 6, fontWeight: '500' },
     inputBar: {
         flexDirection: 'row',
         alignItems: 'flex-end',
@@ -528,31 +484,6 @@ const styles = StyleSheet.create({
     },
     sendButton: { backgroundColor: '#1E88FF', padding: 12, borderRadius: 50 },
     sendDisabled: { backgroundColor: '#9CA3AF' },
-
-    // Bottom Navigation Styles (matching your provided snippet)
-    bottomNav: {
-        flexDirection: 'row',
-        backgroundColor: '#fff',
-        paddingVertical: 8,
-        borderTopWidth: 1,
-        borderTopColor: '#E5E5EA',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 5,
-    },
-    navItem: {
-        flex: 1,
-        alignItems: 'center',
-        paddingVertical: 4,
-    },
-    navLabel: {
-        fontSize: 11,
-        marginTop: 4,
-        color: '#8E8E93',
-        fontWeight: '500',
-    },
 });
 
 export default Inbox;

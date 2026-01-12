@@ -131,7 +131,7 @@ const Home = () => {
         const fetchTopEducators = async () => {
             try {
                 setLoadingEducators(true);
-                const response = await fetch('https://7a0e0c0f7400.ngrok-free.app/api/user/getTopEducators');
+                const response = await fetch('https://educations.onrender.com/api/user/getTopEducators');
 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
