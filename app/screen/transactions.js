@@ -135,7 +135,7 @@ const Transactions = () => {
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.navItem}>
-                    <Ionicons name="swap-horizontal" size={24} color="#1E88FF" />
+                       <Ionicons name="wallet-outline" size={22} color="#8E8E93" />
                     <Text style={[styles.navText, styles.activeNavText]}>TRANSACTION</Text>
                 </TouchableOpacity>
 
