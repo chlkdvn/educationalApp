@@ -16,7 +16,7 @@ import {
     StyleSheet,
     Text,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 
 const { height } = Dimensions.get('window');
@@ -47,13 +47,11 @@ const CourseVideoPlayer = () => {
 
     const fetchEnrolledCourses = useCallback(async () => {
         if (!isLoaded || !user) return;
-
         try {
             const token = await getToken();
             const res = await fetch(`${BACKEND_URL}/api/user/enrolled-courses`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-
             const data = await res.json();
             if (data.success && data.enrolledCourses) {
                 const currentCourse = data.enrolledCourses.find((c) => c._id === courseId);
@@ -171,10 +169,7 @@ const CourseVideoPlayer = () => {
 
     const submitRating = async (rating) => {
         if (!courseId || !user || ratingLoading) return;
-
-        // Instant visual feedback
         setUserRating(rating);
-
         setRatingLoading(true);
         Animated.sequence([
             Animated.timing(scaleAnim, { toValue: 1.15, duration: 60, useNativeDriver: true }),
@@ -198,7 +193,7 @@ const CourseVideoPlayer = () => {
 
             const data = await res.json();
             if (!data.success) {
-                setUserRating(0); // revert if failed
+                setUserRating(0);
                 Alert.alert('Error', data.message || 'Failed to save');
             }
         } catch (err) {
@@ -237,28 +232,68 @@ const CourseVideoPlayer = () => {
         return `${hrs > 0 ? `${hrs}h ` : ''}${mins}m`;
     };
 
-    const StarRating = ({ rating, onRate }) => (
-        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-            <View style={styles.starContainer}>
-                {[1, 2, 3, 4, 5].map((star) => (
-                    <TouchableOpacity
-                        key={star}
-                        onPress={() => onRate(star)}
-                        disabled={ratingLoading}
-                        activeOpacity={0.65}
-                        hitSlop={{ top: 30, bottom: 30, left: 30, right: 30 }}
-                        style={styles.starButton}
-                    >
-                        <Ionicons
-                            name={star <= rating ? 'star' : 'star-outline'}
-                            size={50}
-                            color={star <= rating ? '#FFD700' : '#777'}
-                        />
-                    </TouchableOpacity>
-                ))}
-            </View>
-        </Animated.View>
-    );
+    const StarRating = ({ rating, onRate }) => {
+        /* 5 independent animated values – one per star */
+        const shines = useRef([...Array(5)].map(() => new Animated.Value(0))).current;
+
+        /* trigger a quick shine on the star that was just pressed */
+        const flash = (idx) => {
+            Animated.sequence([
+                Animated.timing(shines[idx], { toValue: 1, duration: 120, useNativeDriver: true }),
+                Animated.timing(shines[idx], { toValue: 0, duration: 200, useNativeDriver: true }),
+            ]).start();
+        };
+
+        return (
+            <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                <View style={styles.starContainer}>
+                    {[1, 2, 3, 4, 5].map((star, idx) => {
+                        const isActive = star <= rating;
+                        return (
+                            <TouchableOpacity
+                                key={star}
+                                onPress={() => {
+                                    flash(idx);          // instant visual feedback
+                                    onRate(star);        // call the original handler
+                                }}
+                                disabled={ratingLoading}
+                                activeOpacity={0.65}
+                                hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+                                style={styles.starButton}
+                            >
+                                <Animated.View
+                                    style={{
+                                        transform: [
+                                            {
+                                                scale: shines[idx].interpolate({
+                                                    inputRange: [0, 1],
+                                                    outputRange: [1, 1.35],
+                                                }),
+                                            },
+                                        ],
+                                        shadowColor: '#FFD700',
+                                        shadowOffset: { width: 0, height: 0 },
+                                        shadowOpacity: shines[idx],
+                                        shadowRadius: 8,
+                                        elevation: shines[idx].interpolate({
+                                            inputRange: [0, 1],
+                                            outputRange: [0, 8],
+                                        }),
+                                    }}
+                                >
+                                    <Ionicons
+                                        name={isActive ? 'star' : 'star-outline'}
+                                        size={36}
+                                        color={isActive ? '#FFD700' : '#777'}
+                                    />
+                                </Animated.View>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+            </Animated.View>
+        );
+    };
 
     if (loading) return (
         <SafeAreaView style={styles.container}>
@@ -369,17 +404,6 @@ const CourseVideoPlayer = () => {
                         </View>
                     )}
 
-                    <View style={styles.progressSection}>
-                        <View style={styles.progressHeader}>
-                            <Text style={styles.progressLabel}>Progress</Text>
-                            <Text style={styles.progressPercent}>{calculateProgress()}%</Text>
-                        </View>
-                        <View style={styles.progressBar}>
-                            <View style={[styles.progressFill, { width: `${calculateProgress()}%` }]} />
-                        </View>
-                    </View>
-
-                    {/* Rating - Fast, responsive, unlimited */}
                     <View style={styles.ratingSection}>
                         <Text style={styles.sectionTitle}>Rate this Course</Text>
                         <Text style={styles.ratingSubtitle}>Tap to rate (you can change anytime)</Text>
@@ -479,6 +503,7 @@ const CourseVideoPlayer = () => {
     );
 };
 
+/* ---------- styles ---------- */
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#000' },
     header: {
@@ -573,10 +598,12 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
-        marginVertical: 16,
+        marginVertical: 12,
+        gap: 4,
     },
     starButton: {
-        padding: 14,
+        padding: 8,
+        borderRadius: 24,
     },
     starDisabled: {
         opacity: 0.6,
