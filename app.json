@@ -1,0 +1,75 @@
+{
+  "expo": {
+    "name": "Studylee",
+    "slug": "Studylee",
+    "version": "1.0.2",
+    "orientation": "portrait",
+    "icon": "./assets/images/studylee-logo.png",
+    "splash": {
+      "image": "./assets/images/studylee-logo.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#ffffff"
+    },
+    "scheme": "Studylee",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "We need camera access to take photos of gift cards",
+        "NSPhotoLibraryUsageDescription": "We need access to your photo library to select gift card images",
+        "NSPhotoLibraryAddUsageDescription": "We need access to save photos to your library if necessary"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/studylee-logo.png"
+      },
+      "notification": {
+        "icon": "./assets/images/studylee-logo.png",
+        "color": "#000000",
+        "channelId": "default"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.deracali.studylee",
+      "useNextNotificationsApi": true,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "Studylee"
+            }
+          ],
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ]
+        }
+      ]
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/studylee-logo.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-web-browser",
+      "expo-secure-store",
+      "expo-video"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ccf99314-d578-432a-9b00-1029231f7d64"
+      }
+    },
+    "owner": "xitp"
+  }
+}

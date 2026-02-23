@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "399104579956",
+    "project_id": "cardzip-2f9c3",
+    "storage_bucket": "cardzip-2f9c3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:399104579956:android:9eb61bcbdcbd2b90923421",
+        "android_client_info": {
+          "package_name": "com.deracali.cardzipapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAi6tFdK4iIiH5Ylz2n0VjVvPCF4M5GvQ4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
